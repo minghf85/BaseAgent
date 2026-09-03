@@ -7,6 +7,7 @@ is passed to every subsystem (providers, engine, tools, server).
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
@@ -82,8 +83,9 @@ class PromptConfig:
     appends: list[str] = field(default_factory=list)
 
     def build(self) -> str:
-        parts = [self.system]
-        parts.extend(self.appends)
+        # An empty ``system`` means "use the built-in default".
+        base = self.system if self.system else DEFAULT_SYSTEM_PROMPT
+        parts = [base, *self.appends]
         return "\n\n".join(p for p in parts if p)
 
 
@@ -289,7 +291,15 @@ def _build_dataclass(cls: Any, d: Optional[dict[str, Any]]) -> Any:
     if not d:
         return cls()
     valid = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
-    kwargs = {k: v for k, v in d.items() if k in valid}
+    kwargs: dict[str, Any] = {}
+    for k, v in d.items():
+        if k not in valid:
+            continue
+        # Empty YAML containers (a block with only comments) parse as None;
+        # coerce those to their field default so we don't store None.
+        if v is None and cls.__dataclass_fields__[k].default_factory is not dataclasses.MISSING:  # type: ignore[attr-defined]
+            continue
+        kwargs[k] = v
     return cls(**kwargs)
 
 
