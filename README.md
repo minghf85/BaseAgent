@@ -13,6 +13,11 @@ Everything — workspace, prompts, tool set, iteration limit, token & dollar bud
 - **HTTP/SSE server** — `POST /run` streams agent events then a `terminal` event; `GET /health`, `GET /config`, `POST /reset`, `POST /abort`; a `/stream` endpoint for fresh-conversation runs.
 - **Fully testable offline** — ships with a deterministic `MockProvider` and a passing test suite.
 
+## Documentation
+
+- [`docs/project_info.md`](docs/project_info.md) — project intro written for **interviews & resume**: the key design principles, the problems each solves, architecture, and how to talk about the design decisions.
+- [`docs/integration.md`](docs/integration.md) — manual per-provider validation steps (Anthropic / OpenAI / Gemini / Ollama).
+
 ## Install
 
 Requires Python ≥ 3.12 and `uv`.
@@ -21,13 +26,13 @@ Requires Python ≥ 3.12 and `uv`.
 uv sync                 # install deps + the `baseagent` console script
 ```
 
-## Quick start (no API key needed)
+## Quick start
 
-The sample config uses the **mock** provider, which follows a small scripted
-assistant turn (writes a file, then replies) — great for a smoke test.
+The bundled `configs/base.yaml` currently points at a **local Ollama**
+(`qwen3:14b`), so you can drive a real model with no cloud key:
 
 ```bash
-# One-shot run
+# One-shot run (uses the Ollama provider / qwen3:14b)
 baseagent run -c configs/base.yaml -p "Create a demo file"
 
 # Launch the HTTP/SSE server
@@ -41,6 +46,10 @@ curl -N -X POST http://127.0.0.1:8000/run \
      -H 'Content-Type: application/json' \
      -d '{"prompt": "Create a demo file"}'
 ```
+
+> **No model at all?** Switch the config to `provider.type: mock` for a
+> scripted, offline demo (writes a file, then replies) — no keys, no network.
+> See `configs/base.yaml` comments for the script format.
 
 ## Configuration (`configs/base.yaml`)
 
@@ -67,7 +76,7 @@ export GOOGLE_API_KEY=...               # for gemini
 - **Anthropic**: default `https://api.anthropic.com`, `model` e.g. `claude-sonnet-4-6`.
 - **OpenAI**: default `https://api.openai.com/v1`, `model` e.g. `gpt-4o`. Also use `type: openai_compatible` with a `base_url` for any OpenAI-compatible server.
 - **Gemini**: default `https://generativelanguage.googleapis.com/v1beta`, `model` e.g. `gemini-2.0-flash`.
-- **Ollama/local**: `type: ollama` (defaults to `http://localhost:11434/v1`), `model` e.g. `qwen2.5:7b`. Point `base_url` at any local OpenAI-compatible endpoint.
+- **Ollama/local**: `type: ollama` (defaults to `http://localhost:11434/v1`), `model` e.g. `qwen3:14b`. Point `base_url` at any local OpenAI-compatible endpoint. (Validated end-to-end against a real local `qwen3:14b` — the model autonomously called the `Write` tool during a run.)
 - **Mock**: no key needed; script the assistant with `provider.extra_body.script` (a list of `{tool: {...}}` or `{text: "..."}` turns). Used by the tests.
 
 ## Architecture
@@ -109,6 +118,14 @@ The suite covers the six tools (write/read/edit/glob/grep/bash, path-sandbox
 rejection), config parsing/validation, provider message conversion, and the
 engine loop using the mock provider (stop / max_turns / budget terminals,
 tool execution, usage accumulation, reset).
+
+### End-to-end with a real model
+
+The loop was also validated against a live local model via Ollama
+(`qwen3:14b`): given “create `greeting.txt` with Hello world”, the model
+autonomously decided to call the `Write` tool, the engine executed it (the file
+was created on disk), then converged to a `terminal(reason=stop, turns=2)` — a
+full tool-using agent trajectory on a real LLM, not just a unit test.
 
 ## Roadmap ideas
 
