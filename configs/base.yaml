@@ -1,0 +1,88 @@
+# ===========================================================================
+# baseagent configuration
+# Launch the server with:  baseagent serve configs/base.yaml
+# ===========================================================================
+
+# Absolute path to the workspace directory that the agent's tools operate
+# within. All of Read/Write/Edit/Glob/Grep are sandboxed to this directory.
+workspace: "H:/Project/BaseAgent/workspace"
+
+# ---------------------------------------------------------------------------
+# HTTP server
+# ---------------------------------------------------------------------------
+server:
+  host: "127.0.0.1"
+  port: 8000
+  max_concurrency: 4
+
+# ---------------------------------------------------------------------------
+# Model provider
+#   type: anthropic | openai | openai_compatible | gemini | ollama | mock
+# ---------------------------------------------------------------------------
+provider:
+  type: "mock"                    # swap to "anthropic" / "openai" / "gemini" / "ollama"
+  model: "claude-sonnet-4-6"      # e.g. "gpt-4o", "gemini-2.0-flash", "qwen2.5:7b"
+  base_url: ""                    # required for openai_compatible/ollama,
+                                  #   e.g. "http://localhost:11434/v1"
+  api_key_env: "ANTHROPIC_API_KEY"  # env var holding the API key (or set below)
+  api_key: ""                     # optional literal key (takes precedence)
+  max_tokens: 4096
+  temperature: 0.0
+  top_p: 1.0
+  thinking: false                 # Anthropic extended thinking
+  thinking_budget_tokens: 1024
+  timeout_seconds: 600.0
+  extra_headers: {}               # e.g.   {"x-custom": "value"}
+  extra_body: {}
+  # For the mock provider you can script the assistant's turns:
+  #   extra_body:
+  #     script:
+  #       - tool: {name: "Write", input: {file_path: "demo.txt", content: "hi\n"}}
+  #       - text: "Finished."
+
+# ---------------------------------------------------------------------------
+# Prompts
+# ---------------------------------------------------------------------------
+prompt:
+  system: ""        # empty => use the built-in default system prompt
+  appends: []       # extra system-prompt paragraphs, e.g. ["Always use relative paths."]
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+tools:
+  enabled: ["Bash", "Edit", "Read", "Write", "Glob", "Grep"]
+  max_result_chars: 30000     # hard cap on any tool result sent back to the model
+  bash_timeout_ms: 120000
+  bash_shell: ""              # empty => platform default (cmd.exe / /bin/sh)
+  options:
+    # per-tool overrides, e.g.:
+    #   Bash: {timeout_ms: 60000}
+    #   Grep: {max_result_chars: 50000}
+
+# ---------------------------------------------------------------------------
+# Limits & budget
+# ---------------------------------------------------------------------------
+limits:
+  max_iterations: 20          # max model+tools turns before forced stop
+  max_tokens_total: 0         # 0 = unlimited (counts output tokens)
+  max_budget_usd: 0           # 0 = unlimited cost cap
+  max_context_tokens: 0       # optional pre-call context-window guard (0 = off)
+  # Per-model pricing ($/token) for the USD budget:
+  pricing:
+    claude-sonnet-4-6:
+      input: 0.000003
+      output: 0.000015
+      cache_read: 0.0000003
+      cache_write: 0.00000375
+    gpt-4o:
+      input: 0.0000025
+      output: 0.00001
+      cache_read: 0.0
+      cache_write: 0.0
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging:
+  level: "INFO"
