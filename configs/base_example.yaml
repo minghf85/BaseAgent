@@ -12,17 +12,23 @@ workspace: "H:/Project/BaseAgent/workspace"
 # ---------------------------------------------------------------------------
 server:
   host: "127.0.0.1"
-  port: 8000
+  port: 8006
   max_concurrency: 4
+
+# API 鉴权：开启后 /run /stream /reset /abort 需要带 Bearer token
+auth:
+  enabled: false                 # true 开启
+  token: ""                      # 直接写 token；优先于 token_env
+  token_env: "BASEAGENT_API_TOKEN"  # 或从环境变量读取
 
 # ---------------------------------------------------------------------------
 # Model provider
 #   type: anthropic | openai | openai_compatible | gemini | ollama | mock
 # ---------------------------------------------------------------------------
 provider:
-  type: "mock"                    # swap to "anthropic" / "openai" / "gemini" / "ollama"
-  model: "claude-sonnet-4-6"      # e.g. "gpt-4o", "gemini-2.0-flash", "qwen2.5:7b"
-  base_url: ""                    # required for openai_compatible/ollama,
+  type: "ollama"                    # swap to "anthropic" / "openai" / "gemini" / "ollama"
+  model: "qwen3:14b"      # e.g. "gpt-4o", "gemini-2.0-flash", "qwen2.5:7b"
+  base_url: "http://localhost:11434/v1"                    # required for openai_compatible/ollama,
                                   #   e.g. "http://localhost:11434/v1"
   api_key_env: "ANTHROPIC_API_KEY"  # env var holding the API key (or set below)
   api_key: ""                     # optional literal key (takes precedence)

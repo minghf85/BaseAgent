@@ -20,4 +20,4 @@ Thumbs.db
 .DS_Store
 
 ref
-configs
+configs/base.yaml
