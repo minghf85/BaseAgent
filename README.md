@@ -10,7 +10,7 @@ Everything — workspace, prompts, tool set, iteration limit, token & dollar bud
 - **Provider-neutral core** — the engine speaks a single content-block message model; each provider adapter translates to its native wire format over raw `httpx` (no vendor SDKs), so a new provider is one adapter class.
 - **Six tools** — `Bash`, `Edit`, `Read`, `Write`, `Glob`, `Grep`, all sandboxed to the workspace directory (paths outside it are rejected).
 - **Token & budget control** — per-request usage is accumulated from provider-reported values; optional `max_tokens` and `max_budget_usd` guards stop the loop cleanly at a turn boundary, plus an optional pre-call context-window estimator.
-- **HTTP/SSE server** — `POST /run` streams agent events then a `terminal` event; `GET /health`, `GET /config`, `POST /reset`, `POST /abort`; a `/stream` endpoint for fresh-conversation runs.
+- **HTTP/SSE server** — `POST /run` streams agent events then a `terminal` event; `GET /health`, `GET /config`, `POST /reset`, `POST /abort`; a `/stream` endpoint for fresh-conversation runs. Per-request overrides (`workspace` / `tools` / `model` / `provider`) and optional bearer-token auth.
 - **Fully testable offline** — ships with a deterministic `MockProvider` and a passing test suite.
 
 ## Documentation
@@ -57,6 +57,7 @@ curl -N -X POST http://127.0.0.1:8000/run \
 |--------|-------|
 | (top) `workspace` | Absolute directory the agent's tools are sandboxed to (Read/Write/Edit/Glob/Grep cannot escape it). |
 | `server` | `host`, `port`, `max_concurrency`. |
+| `auth` | `enabled` (when true, `/run` `/stream` `/reset` `/abort` require a bearer token), `token` (literal) or `token_env` (env var holding the token). |
 | `provider` | `type` (`anthropic` \| `openai` \| `openai_compatible` \| `gemini` \| `ollama` \| `mock`), `model`, `base_url`, `api_key_env`/`api_key`, `max_tokens`, `temperature`, `top_p`, `thinking`, `timeout_seconds`, plus `extra_headers`/`extra_body` escape hatches. |
 | `prompt` | `system` (empty → built-in default) and `appends` (extra system paragraphs). |
 | `tools` | `enabled` list of the six tools, `max_result_chars` (result cap), `bash_timeout_ms`, `bash_shell`, and per-tool `options`. |
@@ -78,6 +79,37 @@ export GOOGLE_API_KEY=...               # for gemini
 - **Gemini**: default `https://generativelanguage.googleapis.com/v1beta`, `model` e.g. `gemini-2.0-flash`.
 - **Ollama/local**: `type: ollama` (defaults to `http://localhost:11434/v1`), `model` e.g. `qwen3:14b`. Point `base_url` at any local OpenAI-compatible endpoint. (Validated end-to-end against a real local `qwen3:14b` — the model autonomously called the `Write` tool during a run.)
 - **Mock**: no key needed; script the assistant with `provider.extra_body.script` (a list of `{tool: {...}}` or `{text: "..."}` turns). Used by the tests.
+
+## Per-request overrides & auth
+
+`POST /run` and `POST /stream` accept auth-protected overrides that change
+behavior for just that request — without touching `config.yaml`:
+
+| Field | Effect |
+|-------|--------|
+| `workspace` | Override the sandbox directory the tools operate in. |
+| `tools` | Override the enabled tool list, e.g. `["Bash","Read"]`. |
+| `model` | Override the model name. |
+| `provider` | Override the provider type. |
+| `session_id` | Reuse this to continue a conversation across calls. |
+
+Each distinct `session_id` + override combination gets its own isolated
+conversation (its own engine, history, and usage), so a `/run` override never
+leaks into another conversation.
+
+**Auth**: set `auth.enabled: true` and a token via `auth.token` or the
+`auth.token_env` env var. Callers then authenticate with either
+`Authorization: Bearer <token>` or `X-Api-Token: <token>`. `/health` and
+`/config` stay open; `/run`, `/stream`, `/reset`, `/abort` are protected.
+
+```bash
+BASEAGENT_API_TOKEN=sekret baseagent serve configs/base.yaml
+
+curl -N -X POST http://127.0.0.1:8006/run \
+     -H 'Authorization: Bearer sekret' \
+     -H 'Content-Type: application/json' \
+     -d '{"prompt":"list files","workspace":"/tmp/other","tools":["Bash","Glob"],"model":"qwen2.5:7b"}'
+```
 
 ## Architecture
 
@@ -111,13 +143,14 @@ baseagent config-dump -c <config.yaml>      # print the resolved config (keys re
 ## Testing
 
 ```bash
-python -m unittest discover -s tests -v   # 24 tests, no network required
+python -m unittest discover -s tests -v   # 30 tests, no network required
 ```
 
 The suite covers the six tools (write/read/edit/glob/grep/bash, path-sandbox
-rejection), config parsing/validation, provider message conversion, and the
-engine loop using the mock provider (stop / max_turns / budget terminals,
-tool execution, usage accumulation, reset).
+rejection), config parsing/validation, provider message conversion, the engine
+loop using the mock provider (stop / max_turns / budget terminals, tool
+execution, usage accumulation, reset), and the HTTP server (auth enforcement
+and per-request workspace/tools overrides).
 
 ### End-to-end with a real model
 
@@ -131,5 +164,5 @@ full tool-using agent trajectory on a real LLM, not just a unit test.
 
 - Permission prompts / tool-approval hooks wired into the loop (`QueryEngine.confirm_tool`).
 - History compaction and a `max_turns`-style auto-compact when the context window fills.
-- Persisted sessions / multi-tenant run isolation keyed by session id.
+- Rate limiting and per-token scopes on top of the bearer auth.
 - OpenTelemetry export of usage telemetry.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Optional
 
 import yaml
@@ -45,6 +45,26 @@ class ServerConfig:
     port: int = 8000
     # Max concurrency for /run streams (per-process semaphore).
     max_concurrency: int = 4
+
+
+@dataclass
+class AuthConfig:
+    """API authentication for the HTTP server.
+
+    When ``enabled``, mutating endpoints (``/run``, ``/stream``, ``/reset``,
+    ``/abort``) require a bearer token in the ``Authorization`` header or an
+    ``X-Api-Token`` header. The token comes from ``token`` (literal) or the
+    environment variable named by ``token_env``.
+    """
+
+    enabled: bool = False
+    token: str = ""
+    token_env: str = "BASEAGENT_API_TOKEN"
+
+    def resolve_token(self) -> str:
+        if self.token:
+            return self.token
+        return os.environ.get(self.token_env, "")
 
 
 @dataclass
@@ -147,6 +167,7 @@ class Config:
     workspace: str = "."
 
     server: ServerConfig = field(default_factory=ServerConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     prompt: PromptConfig = field(default_factory=PromptConfig)
     tools: ToolConfig = field(default_factory=ToolConfig)
@@ -164,6 +185,7 @@ class Config:
     def from_dict(cls, d: dict[str, Any], base_dir: str | None = None) -> "Config":
         provider = _build_dataclass(ProviderConfig, d.get("provider", {}))
         server = _build_dataclass(ServerConfig, d.get("server", {}))
+        auth = _build_dataclass(AuthConfig, d.get("auth", {}))
         prompt = _build_dataclass(PromptConfig, d.get("prompt", {}))
         tools = _build_dataclass(ToolConfig, d.get("tools", {}))
         limits_d = d.get("limits", {})
@@ -184,6 +206,7 @@ class Config:
         cfg = cls(
             workspace=workspace,
             server=server,
+            auth=auth,
             provider=provider,
             prompt=prompt,
             tools=tools,
@@ -222,6 +245,38 @@ class Config:
         }:
             raise ValueError(f"Unknown provider type: {self.provider.type!r}")
 
+    def overridden(
+        self,
+        *,
+        workspace: str | None = None,
+        tools: list[str] | None = None,
+        model: str | None = None,
+        provider_type: ProviderType | None = None,
+        provider_options: dict[str, Any] | None = None,
+    ) -> "Config":
+        """Return a new Config with per-request overrides applied.
+
+        The original config instance is never mutated; ``dataclasses.replace``
+        copies each section. This is what the HTTP API uses to honour
+        request-level ``workspace`` / ``tools`` / ``model`` / ``provider``
+        without touching the server-wide defaults.
+        """
+        cfg = replace(self)
+        if workspace is not None:
+            ws = os.path.abspath(os.path.expanduser(workspace))
+            cfg.workspace = ws
+        if tools is not None:
+            cfg.tools = replace(self.tools, enabled=list(tools))
+        if model is not None:
+            cfg.provider = replace(self.provider, model=model)
+        if provider_type is not None:
+            cfg.provider = replace(cfg.provider, type=provider_type)
+        if provider_options:
+            valid = {f for f in ProviderConfig.__dataclass_fields__}
+            opts = {k: v for k, v in provider_options.items() if k in valid and v is not None}
+            cfg.provider = replace(cfg.provider, **opts)
+        return cfg
+
     def to_dict(self, redact_keys: bool = True) -> dict[str, Any]:
         d = {
             "workspace": self.workspace,
@@ -229,6 +284,12 @@ class Config:
                 "host": self.server.host,
                 "port": self.server.port,
                 "max_concurrency": self.server.max_concurrency,
+            },
+            "auth": {
+                "enabled": self.auth.enabled,
+                "token_env": self.auth.token_env,
+                "token_set": bool(self.auth.resolve_token()),
+                "token": "***" if redact_keys and self.auth.token else self.auth.token,
             },
             "provider": {
                 "type": self.provider.type,
