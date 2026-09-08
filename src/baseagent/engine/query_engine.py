@@ -36,6 +36,7 @@ from ..types import (
 )
 from .context import estimate_context_tokens
 from .usage import UsageTracker
+from ..extension.extension import ExtensionContext
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,17 @@ class QueryEngine:
         # default tools; extensible).
         confirm = getattr(self, "confirm_tool", None)
 
+        # Extension lifecycle context (extensions are runtime plugins; see
+        # baseagent.extension). meta is empty here — an extension that needs stage
+        # descriptors is built with them by its host.
+        ext_ctx = ExtensionContext(
+            workspace=self.config.workspace,
+            turn_count=self.turn_count,
+            config=self.config,
+        )
+        for ext in self.config.extensions:
+            _call_hook(ext, "on_run_start", ext_ctx)
+
         self_history = self.history
         # Append the user prompt as a fresh user message.
         self_history.append(Message.text_message("user", prompt))
@@ -129,6 +141,7 @@ class QueryEngine:
                             ),
                             usage=self.tracker.cumulative,
                         )
+                        self._end_extensions(ext_ctx)
                         return
 
                 # ---- budget pre-check (before spending more) -------------
@@ -141,6 +154,7 @@ class QueryEngine:
                         error=f"Budget limit reached ({reason}).",
                         usage=self.tracker.cumulative,
                     )
+                    self._end_extensions(ext_ctx)
                     return
 
                 yield RequestStartEvent(iteration=self.turn_count + 1)
@@ -174,6 +188,7 @@ class QueryEngine:
                         text=final_text,
                         usage=self.tracker.cumulative,
                     )
+                    self._end_extensions(ext_ctx)
                     return
 
                 # ---- execute the requested tools -------------------------
@@ -210,6 +225,7 @@ class QueryEngine:
                         text=_assistant_text(turn.assistant_message),
                         usage=self.tracker.cumulative,
                     )
+                    self._end_extensions(ext_ctx)
                     return
                 if self.turn_count >= max_iterations:
                     yield Terminal(
@@ -218,10 +234,21 @@ class QueryEngine:
                         text=_assistant_text(turn.assistant_message),
                         usage=self.tracker.cumulative,
                     )
+                    self._end_extensions(ext_ctx)
                     return
 
                 # Feed tool results back to the model as a user message.
                 self_history.append(Message(role="user", content=result_blocks))
+
+                # Extension hook: observers may validate/commit the workspace
+                # and, on failure, inject a redo message for the next turn. The
+                # injected message is an ordinary user turn, so the redo still
+                # counts against max_iterations (no unbounded loop).
+                ext_ctx.turn_count = self.turn_count
+                for ext in self.config.extensions:
+                    note = _call_hook(ext, "on_turn_end", ext_ctx)
+                    if note:
+                        self_history.append(Message.text_message("user", note))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # provider/tool failure -> terminal error
@@ -233,6 +260,27 @@ class QueryEngine:
                 error=str(exc),
                 usage=self.tracker.cumulative,
             )
+            self._end_extensions(ext_ctx)
+
+    def _end_extensions(self, ctx: ExtensionContext) -> None:
+        ctx.turn_count = self.turn_count
+        for ext in self.config.extensions:
+            _call_hook(ext, "on_run_end", ctx)
+
+
+def _call_hook(ext, name: str, ctx: ExtensionContext) -> str | None:
+    """Invoke a lifecycle hook, swallowing extension errors (never break the run)."""
+    fn = getattr(ext, name, None)
+    if fn is None:
+        return None
+    try:
+        result = fn(ctx)
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("extension %r hook %s failed", getattr(ext, "name", ext), name)
+        return None
+    if name == "on_turn_end":
+        return result if isinstance(result, str) and result else None
+    return None
 
 
 def _assistant_text(message: Message) -> str:

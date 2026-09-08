@@ -174,6 +174,10 @@ class Config:
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
+    # Runtime-only extensions attached to the engine (not loaded from YAML, not
+    # serialized). See ``baseagent.extension``.
+    extensions: list[Any] = field(default_factory=list, repr=False)
+
     # Allow arbitrary extra top-level keys to be stashed (forward compatible).
     _raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
