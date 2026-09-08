@@ -247,11 +247,24 @@ class ToolUseEvent:
 class ToolResultEvent:
     type: Literal["tool_result"] = "tool_result"
     tool_use_id: str = ""
+    tool_name: str = ""
+    status: ToolStatus = "success"
     is_error: bool = False
     output: str = ""
+    error_type: Optional[str] = None
+    error_message: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"type": self.type, "id": self.tool_use_id, "is_error": self.is_error, "output": self.output}
+        return {
+            "type": self.type,
+            "id": self.tool_use_id,
+            "tool_name": self.tool_name,
+            "status": self.status,
+            "is_error": self.is_error,
+            "output": self.output,
+            "error_type": self.error_type,
+            "error_message": self.error_message,
+        }
 
 
 @dataclass
@@ -261,6 +274,34 @@ class IterationEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return {"type": self.type, "iteration": self.iteration}
+
+
+@dataclass
+class TurnEvent:
+    """Post-hoc record of one complete model turn.
+
+    The streamed ``assistant_message`` events are per-delta text; this event is
+    the *assembled* turn — full assistant content blocks (including every tool
+    call with its complete input), the stop reason, and the per-request usage —
+    so traces carry complete detail for offline analysis.
+    """
+
+    type: Literal["turn"] = "turn"
+    iteration: int = 0
+    stop_reason: str = ""
+    text: str = ""
+    content: list[dict[str, Any]] = field(default_factory=list)
+    usage: Usage = field(default_factory=Usage.empty)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "iteration": self.iteration,
+            "stop_reason": self.stop_reason,
+            "text": self.text,
+            "content": self.content,
+            "usage": self.usage.to_dict(),
+        }
 
 
 @dataclass
@@ -298,6 +339,7 @@ StreamEvent = Union[
     ToolUseEvent,
     ToolResultEvent,
     IterationEvent,
+    TurnEvent,
     UsageEvent,
     TerminalEvent,
 ]
@@ -308,6 +350,7 @@ EVENT_CLASSES = {
     "tool_use": ToolUseEvent,
     "tool_result": ToolResultEvent,
     "iteration": IterationEvent,
+    "turn": TurnEvent,
     "usage": UsageEvent,
     "terminal": TerminalEvent,
 }

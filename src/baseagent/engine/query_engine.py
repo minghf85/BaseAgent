@@ -32,6 +32,7 @@ from ..types import (
     ToolResult,
     ToolResultBlock,
     ToolResultEvent,
+    TurnEvent,
     UsageEvent,
 )
 from .context import estimate_context_tokens
@@ -178,6 +179,16 @@ class QueryEngine:
                 self_history.append(turn.assistant_message)
                 self.turn_count += 1
 
+                # Yield the assembled turn (full message + stop reason + usage) so
+                # trace consumers see complete tool-call details, not just deltas.
+                yield TurnEvent(
+                    iteration=self.turn_count,
+                    stop_reason=turn.stop_reason,
+                    text=_assistant_text(turn.assistant_message),
+                    content=[b.to_dict() for b in turn.assistant_message.content],
+                    usage=turn.usage,
+                )
+
                 tool_uses = turn.tool_uses
                 if not tool_uses:
                     # Model finished without more tool calls.
@@ -203,7 +214,15 @@ class QueryEngine:
                                 result_blocks.append(
                                     ToolResultBlock(tool_use_id=tu.id, content="Permission denied by user.", is_error=True)
                                 )
-                                yield ToolResultEvent(tool_use_id=tu.id, is_error=True, output="Permission denied by user.")
+                                yield ToolResultEvent(
+                                    tool_use_id=tu.id,
+                                    tool_name=tu.name,
+                                    status="error",
+                                    is_error=True,
+                                    output="Permission denied by user.",
+                                    error_type="permission_denied",
+                                    error_message="Permission denied by user.",
+                                )
                                 continue
                         except asyncio.CancelledError:
                             raise
@@ -214,7 +233,15 @@ class QueryEngine:
                     result_blocks.append(
                         ToolResultBlock(tool_use_id=tu.id, content=r.as_block_content, is_error=r.is_error)
                     )
-                    yield ToolResultEvent(tool_use_id=tu.id, is_error=r.is_error, output=r.output)
+                    yield ToolResultEvent(
+                        tool_use_id=tu.id,
+                        tool_name=tu.name,
+                        status=r.status,
+                        is_error=r.is_error,
+                        output=r.output,
+                        error_type=r.error_type,
+                        error_message=r.error_message,
+                    )
 
                 # ---- iteration boundary -----------------------------------
                 yield IterationEvent(iteration=self.turn_count)
