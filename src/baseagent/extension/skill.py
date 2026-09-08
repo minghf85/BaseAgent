@@ -166,20 +166,47 @@ def inject(skill: Skill) -> str:
     The fragment is the SKILL.md body (title/description folded in), followed
     by the reference templates as verbatim markdown blocks. Placeholders in the
     templates are intentionally left as-is.
+
+    Before rendering, any mode: auto scripts that transform the Skill are
+    applied (e.g., skill_fill for location-aware template injection).
     """
+    # Apply skill_fill if present in scripts
+    skill_transformed = skill
+    for script in skill.scripts:
+        if script.name == "skill_fill" and script.mode == "auto":
+            skill_transformed = _apply_skill_fill(skill_transformed)
+            break
+
     parts: list[str] = []
-    if skill.description:
-        parts.append(f"# {skill.name}\n{skill.description}")
-    if skill.body.strip():
-        parts.append(skill.body.strip())
-    script_block = _script_lines(skill)
+    if skill_transformed.description:
+        parts.append(f"# {skill_transformed.name}\n{skill_transformed.description}")
+    if skill_transformed.body.strip():
+        parts.append(skill_transformed.body.strip())
+    script_block = _script_lines(skill_transformed)
     if script_block:
         parts.append(script_block)
-    if skill.references:
+    if skill_transformed.references:
         parts.append("## Reference templates (follow these exactly)")
-        for ref in skill.references:
+        for ref in skill_transformed.references:
             parts.append(f"### {ref.rel_path}\n\n```markdown\n{ref.text.rstrip()}\n```")
     return "\n\n".join(p for p in parts if p.strip())
+
+
+def _apply_skill_fill(skill: Skill) -> Skill:
+    """Apply skill_fill transformation if the module is available.
+
+    Dynamically imports fill_skill from the skill's scripts package and applies
+    location-aware template injection. Falls back to the original skill if the
+    module cannot be imported.
+    """
+    try:
+        # Try importing from the skill's scripts package
+        # The skill scripts are expected to be importable via gitmem_scripts
+        from gitmem_scripts.skill_fill import fill_skill
+        return fill_skill(skill)
+    except ImportError:
+        # If skill_fill module doesn't exist, return the skill unchanged
+        return skill
 
 
 __all__ = [
