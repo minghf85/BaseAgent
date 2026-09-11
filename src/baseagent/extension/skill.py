@@ -172,9 +172,11 @@ def inject(skill: Skill) -> str:
     """
     # Apply skill_fill if present in scripts
     skill_transformed = skill
+    skill_fill_present = False
     for script in skill.scripts:
         if script.name == "skill_fill" and script.mode == "auto":
             skill_transformed = _apply_skill_fill(skill_transformed)
+            skill_fill_present = True
             break
 
     parts: list[str] = []
@@ -182,13 +184,17 @@ def inject(skill: Skill) -> str:
         parts.append(f"# {skill_transformed.name}\n{skill_transformed.description}")
     if skill_transformed.body.strip():
         parts.append(skill_transformed.body.strip())
-    script_block = _script_lines(skill_transformed)
-    if script_block:
-        parts.append(script_block)
-    if skill_transformed.references:
-        parts.append("## Reference templates (follow these exactly)")
-        for ref in skill_transformed.references:
-            parts.append(f"### {ref.rel_path}\n\n```markdown\n{ref.text.rstrip()}\n```")
+    # When skill_fill (mode: auto) ran, it inlined every template at its marker
+    # inside the body, so appending the scripts/reference blocks again below
+    # would duplicate content in the model context. Skip them in that case.
+    if not skill_fill_present:
+        script_block = _script_lines(skill_transformed)
+        if script_block:
+            parts.append(script_block)
+        if skill_transformed.references:
+            parts.append("## Reference templates (follow these exactly)")
+            for ref in skill_transformed.references:
+                parts.append(f"### {ref.rel_path}\n\n```markdown\n{ref.text.rstrip()}\n```")
     return "\n\n".join(p for p in parts if p.strip())
 
 
